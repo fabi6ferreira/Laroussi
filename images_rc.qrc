@@ -1,7 +1,15 @@
 <RCC>
   <qresource prefix="images">
+    <file>Images/printing.png</file>
+    <file>Images/add.png</file>
+    <file>Images/bin.png</file>
+    <file>Images/refresh.png</file>
+    <file>Images/save.png</file>
+    <file>Images/clean.png</file>
     <file>Images/files_white.png</file>
+    <file>Images/cart.png</file>
     <file>Images/increase.png</file>
+    <file>Images/shopping-cart .png</file>
     <file>Images/package.png</file>
     <file>Images/power.png</file>
     <file>Images/supplier_white.png</file>
