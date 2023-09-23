@@ -1,13 +1,15 @@
 import sys
 import MySQLdb
+import images_rc
+import os
+import time
+import tempfile
 from PyQt5.QtCore import *
 from PyQt5.QtGui import *
 from PyQt5.QtWidgets import *
 from PyQt5.uic import loadUi
 from PIL import Image
-import images_rc
-import os
-import pandas as pd
+
 
 class main_project(QMainWindow):
     def __init__(self):
@@ -18,13 +20,23 @@ class main_project(QMainWindow):
         # Set Default Home Page
         self.Open_DashTab()
 
-        # Load Data base From MySQL To QTableWidget
+        # Load Data base From MySQL To QTableWidget Update_Date_Time 
         self.Load_Emp_Data()
         self.Load_Supp_Data()
         self.Load_Category_Data()
         self.Load_Products_Data()
         self.Load_Sales_Products_Data()
+        self.Update_Date_Time()
+        # Update Dashboard Content
+        self.Dashboard_Content()
 
+
+        self.Handel_Button() 
+
+        # Update Date & Time
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.Update_Date_Time)
+        self.timer.start(1000)
 
         # Load Data base From Bills To QListWidget
         self.Show_Bills()
@@ -50,9 +62,13 @@ class main_project(QMainWindow):
         # Customized Category_tableWidget
         self.Category_tableWidget.setColumnWidth(0, 180)
         self.Category_tableWidget.setColumnWidth(1, 495)
-        
-        self.Handel_Button() 
 
+        # Customized Product_Cart_tableWidget
+        self.Product_Cart_tableWidget.setColumnWidth(0, 50)
+        self.Product_Cart_tableWidget.setColumnWidth(3, 70)
+        self.Sales_Product_tableWidget.setColumnWidth(0, 50)
+        self.Sales_Product_tableWidget.setColumnWidth(1, 180)
+       
         # Customized Employee Button
         self.Empl_Save_Btn.clicked.connect(self.Add_Emp_Data)
         self.Empl_Update_Btn.clicked.connect(self.Update_Emp_Record)
@@ -104,25 +120,28 @@ class main_project(QMainWindow):
         self.Calc_Equals_Btn.clicked.connect(lambda: self.math_it())
         self.Calc_Divided_Btn.clicked.connect(lambda: self.press_it('/'))
 
+        # Customized Bill Area Button
+        self.Print_Bill_Btn.clicked.connect(self.Print_Bill)
+        self.Generate_Bill_Btn.clicked.connect(self.Generate_Bills)
+        self.Cart_Clear_Btn.clicked.connect(self.Clear_Cart)
+        self.Clear_All_Btn.clicked.connect(self.Clear_All)
 
         # Variables
         self.Category_List = []
         self.Supplier_List = []
         self.Cart_List = []
-        self.idproducts = None  # Initialize idproducts as None
+        self.Set_Print = 0
+        "SELECT category_No, category_Name FROM category WHERE category_Name = %s"
         self.Fetch_Supplier_Category()
-
-        # Connect a slot to the 'textChanged' signal of Cuantity_Bill_Area
-        #self.Cuantity_Bill_Area.textChanged.connect(self.calculate_product_price)
-        # Connect a slot to the 'textChanged' signal of Price_PreQty_Bill_Area
-        #self.Price_PreQty_Bill_Area.textChanged.connect(self.calculate_product_price)
 
         # Quantity In Stock 
         self.Sales_Product_tableWidget.itemSelectionChanged.connect(self.update_in_stock)
 
-        # Add Update Cart
+        # Add Update Cart 
         self.Add_Update_Cart_Btn.clicked.connect(self.Add_Update_Cart)
 
+        # Add Update Cart 
+        self.Exit_Button.clicked.connect(self.ExitConfirmation)
 
 ##########################################
 ##### Customized Button & Interface ######
@@ -736,7 +755,7 @@ class main_project(QMainWindow):
                                 self.Product_Supplier_Comb.currentText(),
                                 self.Product_Category_Comb.currentText(),
                                 self.Product_Name.text(),
-                                self.Product_Price.text() + ' DA',
+                                self.Product_Price.text(),
                                 self.Product_Qty.text(),
                                 self.Product_Status_Comb.currentText(),
                         ))
@@ -1035,25 +1054,29 @@ class main_project(QMainWindow):
 
     def Load_Sales_Products_Data(self):
         try:
-            self.db = MySQLdb.connect(host ='localhost' , user ='root' , password ='16031980' , db='laroussi_inventory')
+            self.db = MySQLdb.connect(host='localhost', user='root', password='16031980', db='laroussi_inventory')
             self.cur = self.db.cursor()
             self.cur.execute("SELECT idproducts, products_Name, products_Price, products_QTY, products_Status FROM products")
-            row = self.cur.fetchall()
-            self.Sales_Product_tableWidget.setRowCount(len(row))
+            rows = self.cur.fetchall()
+            self.Sales_Product_tableWidget.setRowCount(len(rows))
             self.Sales_Product_tableWidget.setColumnCount(5)  # Adjust the number of columns
 
-            for row_num, row_data in enumerate(row):
+            for row_num, row_data in enumerate(rows):
                 for col_num, value in enumerate(row_data):
-                    item = QTableWidgetItem(str(value))
+                    if col_num == 3:  # Assuming the quantity column is at index 3
+                        item = QTableWidgetItem(str(int(value)))  # Convert quantity to int
+                    else:
+                        item = QTableWidgetItem(str(value))
                     self.Sales_Product_tableWidget.setItem(row_num, col_num, item)
             self.db.commit()
-        except Exception as ex:           
+        except Exception as ex:
             # Handle the exception by displaying an error message
             QMessageBox.critical(self, 'Error', f'An error occurred: {str(ex)}')
         finally:
             # Close the database connection in the finally block
             if hasattr(self, 'db'):
                 self.db.close()
+
 
 #####################################################
 ######## Search Sales Product's From Database #######
@@ -1142,29 +1165,95 @@ class main_project(QMainWindow):
 
     def Add_Update_Cart(self):
         if self.Cuantity_Bill_Area.text() == '':
-            QMessageBox.critical(self, 'Error !!', 'Cuantity should be Required !!!')
+            QMessageBox.critical(self, 'Error !!', 'Quantity should be Required !!!')
+        elif int(self.Cuantity_Bill_Area.text().strip('[]')) > int(self.In_Stock.text().strip('[]')):
+            QMessageBox.critical(self, 'Error !!', 'There is not enough quantity in stock !!!')    
         else:
-            quantity = float(self.Cuantity_Bill_Area.text())
-            price = float(self.Price_PreQty_Bill_Area.text())
-            price_cal = quantity * price
+            # Assuming you have some criteria to identify the product you want
+            product_name = self.Product_Name_Bill_Area.text()
+
+            self.db = MySQLdb.connect(host='localhost', user='root', password='16031980', db='laroussi_inventory')
+            self.cur = self.db.cursor()
+            # Modify your SQL query to retrieve the specific product by name
+            self.cur.execute("SELECT idproducts, products_Price, products_QTY, products_Status FROM products WHERE products_Name = %s", (product_name,))
+            row = self.cur.fetchone()  # Use fetchone() to retrieve one row
+
+            price_cal = 0  # Initialize price_cal to 0
+
+            if row:
+                quantity = float(self.Cuantity_Bill_Area.text())
+                price = float(row[1])  # Assuming products_Price is in the second column (index 1)
+                price_cal = quantity * price
+
+                # Extract the idproducts from the fetched row
+                ID_Product = row[0]
+
+                # Retrieve the selected product status from Product_Status_Comb
+                product_status_index = self.Product_Status_Comb.currentIndex()
+                product_status = self.Product_Status_Comb.itemText(product_status_index)
+
+                # Load 'idproducts, products_Name, products_Price, products_QTY, products_Status' into cart_data
+                cart_data = [
+                    ID_Product,
+                    product_name, 
+                    price_cal, 
+                    quantity,
+                    product_status
+                ]
+            else:
+                QMessageBox.critical(self, 'Error !!', 'Product not found !!!')
+
+            # Update the Cart
+            present = 'no'
+            index_ = 0
+            for row in self.Cart_List:
+                if ID_Product == row[0]:
+                    present = 'yes'
+                    break
+                index_ += 1
+            if present == 'yes':
+                Op = QMessageBox.question(self, 'Confirm Deletion', 'Product already present\nDo you want to update?| Remove from the Cart List')
+                if Op == QMessageBox.Yes:
+                    if self.Cuantity_Bill_Area.text() == '0':
+                        self.Cart_List.pop(index_)
+                    else:
+                        print("Updating row")
+                        self.Cart_List[index_][2] = price_cal  # Update the price with the calculated price
+                        self.Cart_List[index_][3] = int(self.Cuantity_Bill_Area.text())  # Update the quantity as an integer
+
+                    # Subtract the quantity from Product_Cart_tableWidget and update the database
+                    new_quantity_in_cart = int(self.Cuantity_Bill_Area.text())
+                    current_quantity_in_stock = int(self.In_Stock.text().strip('[]'))
+                    remaining_quantity_in_stock = current_quantity_in_stock - new_quantity_in_cart
+
+                    # Update the Product_Cart_tableWidget
+                    self.In_Stock.setText(f"[{remaining_quantity_in_stock}]")
+
+                    # Update the database with the new quantity
+                    self.cur.execute("UPDATE products SET products_QTY = %s WHERE products_Name = %s", (remaining_quantity_in_stock, product_name))
+                    self.db.commit()
+
+            else:
+                self.Cart_List.append(cart_data)
             
-            # Assuming self.idproducts contains the product ID
-            idproducts = str(self.idproducts) # Convert to string
-            
-            # Retrieve the selected product status from Product_Status_Comb
-            product_status_index = self.Product_Status_Comb.currentIndex()
-            product_status = self.Product_Status_Comb.itemText(product_status_index)
-            
-            # Load 'idproducts, products_Name, products_Price, products_QTY, products_Status' into cart_data
-            cart_data = [
-                idproducts,
-                self.Product_Name_Bill_Area.text(),
-                price,
-                quantity,
-                product_status
-            ]
-            self.Cart_List.append(cart_data)
             self.Show_Cart()
+            self.Bill_Updates()
+
+###########################################
+######## Update Bill ######################
+
+    def Bill_Updates(self):
+        self.bill_amnt= 0 
+        self.net_pay = 0
+        self.discount = 0
+        for row in self.Cart_List:
+            self.bill_amnt = self.bill_amnt + float(row[2])
+
+        self.discount = (self.bill_amnt * 5)/100   
+        self.net_pay = self.bill_amnt-self.discount
+        self.Label_Bill_Amnt.setText(f"[{self.bill_amnt}]")
+        self.Label_Net_Pay.setText(f"[{self.net_pay}]")
+        self.Label_Total_Products.setText(f"[{str(len(self.Cart_List))}]")  
 
 ###########################################
 ######## Add Show Cart ####################
@@ -1181,12 +1270,174 @@ class main_project(QMainWindow):
 
                 # Assuming row_data contains ['idproducts', 'products_Name', 'products_Price', 'products_QTY', 'products_Status']
                 for column_index, value in enumerate(row_data):
-                    item = QTableWidgetItem(str(value))
+                    item = QTableWidgetItem(str(int(value) if column_index == 3 else value))  # Convert quantity to int
                     self.Product_Cart_tableWidget.setItem(row_position, column_index, item)
         except Exception as ex:           
             # Handle the exception by displaying an error message
             QMessageBox.critical(self, 'Error', f'An error occurred: {str(ex)}')
 
+###########################################
+######## Generate Bills ###################
+
+    def Generate_Bills(self):
+        if self.Costomer_Name.text() == '' or self.Contact_N.text() == '':
+            QMessageBox.critical(self, 'Error !!', 'Customer Details should be Required !!!')
+        elif len(self.Cart_List) == 0:
+            QMessageBox.critical(self, 'Error !!', 'Please Add Product To The Cart !!!')
+        else:
+            ### Bill Top ####
+            bill_top = self.Bill_Top()
+            ### Bill Middle ####
+            bill_middle = self.Bill_Middle()  # Get the bill middle content
+            ### Bill Bottom ####
+            bill_bottom = self.Bill_Bottom()
+            
+            # Subtract quantities from Product_Cart_tableWidget and update the database
+            for cart_item in self.Cart_List:
+                product_name = cart_item[1]
+                quantity_in_cart = cart_item[3]
+                
+                # Update the Product_Cart_tableWidget
+                for row in range(self.Sales_Product_tableWidget.rowCount()):
+                    if self.Sales_Product_tableWidget.item(row, 1).text() == product_name:
+                        current_quantity_in_stock = int(self.Sales_Product_tableWidget.item(row, 3).text())
+                        remaining_quantity_in_stock = current_quantity_in_stock - quantity_in_cart
+                        self.Sales_Product_tableWidget.item(row, 3).setText(str(remaining_quantity_in_stock))
+                        
+                        # Update the database with the new quantity
+                        self.cur.execute("UPDATE products SET products_QTY = %s WHERE products_Name = %s", (remaining_quantity_in_stock, product_name))
+                        self.db.commit()
+
+            # Combine the content from Bill_Top, Bill_Middle, and Bill_Bottom
+            full_bill = bill_top + bill_middle + bill_bottom
+
+            # Replace any occurrences of ".0" with an empty string in the full_bill
+            full_bill = full_bill.replace('.0', '')
+
+            self.Costomer_Bill_Area.setPlainText(full_bill)
+
+            fp = open(f'Bills/{str(self.invoice)}.txt','w')
+            fp.write(self.Costomer_Bill_Area.toPlainText())
+            fp.close()
+            QMessageBox.information(self, 'Saved', 'Bill has been Generated/Save in Backend !!!')
+            self.Set_Print = 1
+
+###########################################
+######## Bill's Content ###################
+
+    def Bill_Top(self):
+        self.invoice = int(time.strftime('%H%M%S')) + int(time.strftime('%d%m%Y'))
+        bill_top_temp = f'''
+\t\tLAROUSSI-Inventory
+\t Phone N°. +213***** , Ouled Djellal-07002
+{str('='*53)}
+Costomer Name : {self.Costomer_Name.text()}
+Phone N° : {self.Contact_N.text()}
+Bill N°. {str(self.invoice)}\t\t\tDate : {str(time.strftime('%d/%m/%Y'))}
+{str('='*53)}
+Product Name\t\tQty\t\tPrice 
+{str('='*53)}
+        '''
+        self.Costomer_Bill_Area.clear()
+        self.Costomer_Bill_Area.setPlainText(bill_top_temp)
+        return bill_top_temp  # Return the content
+
+    def Bill_Bottom(self):
+        bill_bottom_temp = f'''
+{str('='*53)}
+Bill Amount\t\t\t\tDA.{self.bill_amnt}
+Discount\t\t\t\tDA.{self.discount}
+Net Pay\t\t\t\tDA.{self.net_pay}
+{str('='*53)}\n
+        '''
+        self.Costomer_Bill_Area.setPlainText(bill_bottom_temp)
+        return bill_bottom_temp  # Return the content    
+
+    def Bill_Middle(self):
+        bill_middle_temp = ''
+        for row in self.Cart_List:
+            Name = row[1]
+            QTY = str(row[3])  # Convert QTY to string
+            Price = int(float(row[2]) * int(row[3]))  # Convert to int before converting to string
+            # Accumulate the lines
+            bill_middle_temp += '\n' + Name + '\t\t' + QTY + '\t\tDA.' + str(Price)  # Convert Price to string here
+        return bill_middle_temp  # Return the bill middle content
+
+###########################################
+######## Clear All ########################
+
+    def Clear_Cart(self):
+        self.Product_Name_Bill_Area.clear()
+        self.Price_PreQty_Bill_Area.clear()
+        self.Cuantity_Bill_Area.clear()
+        self.In_Stock.clear()
+
+    def Clear_All(self):
+        del self.Cart_List[:]
+        self.Costomer_Name.clear()
+        self.Contact_N.clear()
+        self.Costomer_Bill_Area.clear()
+        self.Label_Total_Products.setText(f"[0]")
+        self.Sales_Search_Product_Input.clear()
+        self.Clear_Cart()
+        self.show()
+        self.Show_Cart()
+
+###########################################
+######## Display Date & Time ##############
+
+    def Update_Date_Time(self):
+        current_time = time.strftime('%I:%M:%S')
+        current_date = time.strftime('%d-%m-%Y')
+        self.Date_Time.setText(f'Welcome to Laroussi Inventory Management System\t\t\t\t Date : {current_date}\t\t\t\t Time : {current_time}')
+
+    def Print_Bill(self):
+        if self.Set_Print == 1:
+            QMessageBox.information(self, 'Print', 'Please wait while Printing !!!')
+            new_file = tempfile.mktemp('.txt')
+            open(new_file, 'w').write(self.Costomer_Bill_Area.toPlainText())
+            os.startfile(new_file, 'print')            
+        else:
+            QMessageBox.critical(self, 'Print', 'Please Generate Bill, to print the receipt !!!')
+
+###########################################
+######## Dashboard Functions ##############
+
+    def Dashboard_Content(self):
+            self.db = MySQLdb.connect(host='localhost', user='root', password='16031980', db='laroussi_inventory')
+            self.cur = self.db.cursor()
+            try:
+
+                self.cur.execute('SELECT * FROM employee')
+                employee = self.cur.fetchall()
+                self.Total_Employee_Label.setText(f"[{str(len(employee))}]")
+
+                self.cur.execute('SELECT * FROM supplier')
+                supplier = self.cur.fetchall()
+                self.Total_Supplier_Label.setText(f"[{str(len(supplier))}]")
+
+                self.cur.execute('SELECT * FROM category')
+                category = self.cur.fetchall()
+                self.Total_Category_Label.setText(f"[{str(len(category))}]")
+
+                self.cur.execute('SELECT * FROM products')
+                products = self.cur.fetchall()
+                self.Total_Products_Label.setText(f"[{str(len(products))}]")
+
+                Bills = len(os.listdir('Bills'))
+                self.Total_Sales_Label.setText(f"[{Bills}]")
+
+                self.db.commit()
+            except Exception as ex:           
+                # Handle the exception by displaying an error message
+                QMessageBox.critical(self, 'Error', f'An error occurred: {str(ex)}')
+
+    def ExitConfirmation(self):
+        reply = QMessageBox.question(self, 'Exit Confirmation', 'Are you sure you want to exit?', QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        
+        if reply == QMessageBox.Yes:
+            # User clicked 'Yes,' so exit the application
+            QApplication.quit()
 
 
 
